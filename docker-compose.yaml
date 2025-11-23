@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:12       # Matches your old project
+    container_name: postgres_streaming
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: fraud_detection_db
+    ports:
+      - "5433:5432"          # Host Port : Container Port | Port 5433 to avoid conflict 
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
