@@ -25,7 +25,16 @@ def generate_raw_order():
     country = random.choice(COUNTRIES)
     
     # 2. Randomize quantity
-    #quantity = random.randint(1, 150) # random quantity antara 1 s/d 150 untuk deteksi 'Quantity > 100'
+    #quantity = random.randint(1, 150) # random quantity antara 1 s/d 150 untuk deteksi 'Quantity > 100"
+    # revisi sedikit untuk deteksi fraud quantity di jam kritis dengan menitikberatkan pada amount LOW
+    die = random.randint(1, 6) 
+
+    if die < 4:  # 1, 2, 3 ---> maksimal 100 quantity
+        quantity = random.randint(1, 100)
+    elif die < 6:  # 4, 5 ---> antara 101 s/d 300 
+        quantity = random.randint(101, 300)
+    else:  # 6 ---> lebih dari 300
+        quantity = random.randint(301, 500)
     
     # Random price antara 100 ribu s/d 600 juta untuk deteksi 'Amount > 300 juta'
     # raw_price = random.randint(100000, 600000000) ---> direvisi karena sering menampilkan angka diatas 100000000
@@ -39,7 +48,7 @@ def generate_raw_order():
     elif dice < 6:  # 4, 5 ---> antara 100 juta s/d 300 juta
         raw_price = random.randint(100000000, 299999999)
     else:  # 6 ---> 300 juta keatas
-        raw_price = random.randint(300000000, 700000000)
+        raw_price = random.randint(300000000, 500000000)
    
     
     # 3. Tambah string Rp dan titik koma sebagai penanda cash pembayaran (e.g., "Rp.125,000,000")
@@ -79,7 +88,7 @@ def run_producer():
             # CRITICAL: FLUSH data untuk write secepatnya agar dapat dibaca subscriber
             f.flush()
             
-            print(f"-> Appended order {order['order_id']} | Amount: {order['amount']}")
+            print(f"-> Appended order {order['order_id']} | QTY: {order['quantity']} | Amount: {order['amount']}")
             
             # Jeda 0.5 detik
             time.sleep(0.5)

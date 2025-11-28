@@ -41,7 +41,8 @@ def clean_and_process_order(raw_order):
     # A. Transaksi antara jam 12 malam s/d 4 pagi (00:00 to 04:59)
     # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
     is_risky_hour = (order_hour >= 0) and (order_hour < 5)
-    if is_risky_hour and (amount_numeric >= 100000000): # transaksi lebih dari 100 juta
+    if is_risky_hour and ((amount_numeric >= 100000000) or raw_order['quantity'] > 100 ): 
+        # transaksi lebih dari 100 juta dan quantity lebih dari 100
         status = "fraud"
         
     # B. Lokasi bukan Indonesia
@@ -49,9 +50,9 @@ def clean_and_process_order(raw_order):
     if status == "genuine" and raw_order['country'] != 'ID':
         status = "fraud"
         
-    # C. Anomali data yang berlebih (transaksi up to 300 juta atau pembelian lebih dari 100 quantity)
+    # C. Anomali data yang berlebih (transaksi up to 300 juta atau pembelian lebih dari 300 quantity)
     # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
-    if status == "genuine" and (amount_numeric >= 300000000 or raw_order['quantity'] > 100):
+    if status == "genuine" and (amount_numeric >= 300000000 or raw_order['quantity'] > 300):
         status = "fraud"
 
     # --- 3. RETURN ENRICHED DATA FOR POSTGRE INSERT ---
@@ -101,7 +102,7 @@ def insert_processed_order(enriched_order):
     try:
         cursor.execute(insert_query, data)
         # Note: Autocommit=True in db.py handles the commit here
-        print(f"-> SAVED | Status: {enriched_order['status']} | Amount: {enriched_order['amount']} | Country: {enriched_order['country']}")
+        print(f"-> SAVED | Status: {enriched_order['status']} | QTY: {enriched_order['quantity']} | Amount: {enriched_order['amount']} | Country: {enriched_order['country']}")
     except psycopg2.Error as e:
         print(f"DB INSERT FAILED for order {enriched_order['order_id']}: {e}")
     finally:
@@ -120,7 +121,7 @@ def run_subscriber():
     # 1. Wait for file to exist (The 30-second delay logic happens here implicitly)
     while not os.path.exists(file_path):
         print("Waiting for producer to create file...", end='\r')
-        time.sleep(5)
+        time.sleep(1)
         
     # 2. Open the file in Read Mode
     # Using 'with' is important to handle file closing automatically
