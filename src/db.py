@@ -27,7 +27,11 @@ def get_db_connection():
 
 def init_db():
     """
-    Create Table "ecommersssOrders" jika belum ada
+    Jika belum ada maka Create Table sebagai berikut
+    1. Table "ecommersssOrders" untuk fase streaming pipeline
+    2. Table "ecommersssProducts" utk Batch pipeline
+    3. Table "ecommersssUsers" utk Batch pipeline
+
     Functions juga sudah termasuk Schema Table
     """
     conn = get_db_connection()
@@ -36,25 +40,62 @@ def init_db():
     
     cursor = conn.cursor()
     
-    # SQL untuk Create table dan Schemanya
+    # SQL untuk Create table "ecommersssOrders"
+    # Amount masih menggunakan VARCHAR untuk handle currency Rp.
 
-    create_table_query = """
+    create_order_query = """
     CREATE TABLE IF NOT EXISTS ecommersssOrders (
         id SERIAL PRIMARY KEY,
         order_id VARCHAR(50),
         user_id VARCHAR(50),
         product_id VARCHAR(50),
         quantity INTEGER,
-        amount NUMERIC(18, 2),
+        amount VARCHAR(50),
+        payment_method VARCHAR(50),
         country VARCHAR(10),
         created_date TIMESTAMP,
         status VARCHAR(20)
     );
     """
+
+    # SQL untuk Create table "ecommersssProducts"
+    # Dihandle oleh Airflow
+
+    create_product_query = """
+    CREATE TABLE IF NOT EXISTS ecommersssProducts (
+        product_id VARCHAR(50) PRIMARY KEY,
+        product_name VARCHAR(100),
+        category VARCHAR(50),
+        price NUMERIC(18, 2),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+
+    # SQL untuk Create table "ecommersssUsers"
+    # Dihandle oleh Airflow
+
+    create_user_query = """
+    CREATE TABLE IF NOT EXISTS ecommersssUsers (
+        user_id VARCHAR(50) PRIMARY KEY,
+        first_name VARCHAR(50),
+        last_name VARCHAR(50),
+        email VARCHAR(100),
+        phone_number VARCHAR(20),
+        registration_date TIMESTAMP
+    );
+    """
     
     try:
-        cursor.execute(create_table_query)
+        # Execute creation for all 3 tables
+        cursor.execute(create_order_query)
         print("Table 'ecommersssOrders' checked/created successfully.")
+        
+        cursor.execute(create_product_query)
+        print("Table 'ecommersssProducts' checked/created successfully.")
+        
+        cursor.execute(create_user_query)
+        print("Table 'ecommersssUsers' checked/created successfully.")
+    
     except Exception as e:
         print(f" Error creating table: {e}")
     finally:
@@ -63,5 +104,5 @@ def init_db():
 
 # This allows you to run 'python src/db.py' directly to verify everything
 if __name__ == "__main__":
-    print("Testing Database Connection...")
+    print("--- Initializing Database Schema ---")
     init_db()

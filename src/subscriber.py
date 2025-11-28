@@ -1,70 +1,76 @@
 import datetime
-import re # Used for cleaning the amount string
+import re       # untuk cleaning string seperti pada value AMOUNT
 import psycopg2
-from .db import get_db_connection # Import the connection function from db.py
+import json     # Untuk read JSONL
+import time
+import os
+import glob
+import sys
+from .db import get_db_connection # Import connection function dari inisiasi db.py
 
 def clean_and_process_order(raw_order):
     """
-    Cleans the data, applies fraud rules, and returns an enriched order dictionary.
+    merapikan raw data (amount, date) untuk checking fraud,
+    namun raw data yang diinput ke Postgre.
     """
     
-    # --- 1. DATA CLEANING & TRANSFORMATION ---
+    # --- 1. DATA CLEANING & MINOR TRANSFORMATION ---
     
-    # Clean Amount (Remove "Rp." and periods, then convert to float/NUMERIC)
+    # Merapikan value amount ("Rp." dan koma pemisah dihapus and convert ke float(NUMERIC) )
     amount_str = raw_order['amount']
-    # Use regex to remove non-numeric characters (except the final decimal, if needed)
     cleaned_amount = re.sub(r'[^\d]', '', amount_str)
+    
     try:
         amount_numeric = float(cleaned_amount)
     except ValueError:
         print(f"Skipping order {raw_order['order_id']}: Could not clean amount '{amount_str}'")
-        return None # Skip invalid records
+        return None 
     
-    # Convert created_date string to datetime object and extract time components
+    # mengubah created_date string menjadi datetime object, ambil value hour
     try:
         created_dt = datetime.datetime.fromisoformat(raw_order['created_date'])
-        order_hour = created_dt.hour # 0 through 23
+        order_hour = created_dt.hour # 0 s/d 23
     except ValueError:
         print(f"Skipping order {raw_order['order_id']}: Invalid date format.")
         return None
         
-    # --- 2. FRAUD RULE EVALUATION (THE JUDGMENT) ---
+    # --- 2. FRAUD RULE STATEMENT (GENUINE OR FRAUD?) ---
     
     status = "genuine"
     
-    # A. Night-Time Attack Check (Rule 4 consolidated)
-    # Time is between 00:00 (0) and 04:00 (4) AND Amount is high
-    is_risky_hour = (order_hour >= 0) and (order_hour < 4)
-    if is_risky_hour and (amount_numeric >= 100000000): # >= 100 Million
+    # A. Transaksi antara jam 12 malam s/d 4 pagi (00:00 to 04:59)
+    # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
+    is_risky_hour = (order_hour >= 0) and (order_hour < 5)
+    if is_risky_hour and (amount_numeric >= 100000000): # transaksi lebih dari 100 juta
         status = "fraud"
         
-    # B. Geographic Risk Check (Rule 1)
-    # Check if status is already fraud, or apply the new rule
+    # B. Lokasi bukan Indonesia
+    # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
     if status == "genuine" and raw_order['country'] != 'ID':
         status = "fraud"
         
-    # C. High-Value/Outlier Check (Rules 2 & 5 consolidated)
-    if status == "genuine" and (amount_numeric > 300000000 or raw_order['quantity'] > 100):
+    # C. Anomali data yang berlebih (transaksi up to 300 juta atau pembelian lebih dari 100 quantity)
+    # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
+    if status == "genuine" and (amount_numeric >= 300000000 or raw_order['quantity'] > 100):
         status = "fraud"
 
-    # --- 3. RETURN ENRICHED DATA ---
+    # --- 3. RETURN ENRICHED DATA FOR POSTGRE INSERT ---
     
-    # Create the final dictionary ready for the database
     return {
         "order_id": raw_order['order_id'],
         "user_id": raw_order['user_id'],
         "product_id": raw_order['product_id'],
         "quantity": raw_order['quantity'],
-        "amount": amount_numeric,            # Cleaned NUMERIC value
+        "amount": raw_order['amount'],       # tetap dibiarkan menjadi string agar nanti dirapikan oleh dbt
+        "payment_method": raw_order['payment_method'],
         "country": raw_order['country'],
-        "created_date": created_dt,          # Cleaned DATETIME object
+        "created_date": created_dt,          # DATETIME object (from str to DATETIME) agar mudah diinsert ke Postgre
         "status": status,                    # The judgment
-        "ingestion_time": datetime.datetime.now(datetime.timezone.utc) # For audit
     }
 
 def insert_processed_order(enriched_order):
     """
-    Inserts the final, enriched record into the PostgreSQL database.
+    Inserts data final, enriched ke dalam PostgreSQL database.
     """
     conn = get_db_connection()
     if conn is None:
@@ -73,11 +79,11 @@ def insert_processed_order(enriched_order):
         
     cursor = conn.cursor()
     
-    # PostgreSQL uses %s placeholders
+    # %s digunakan untuk insert POSTGRE placeholder
     insert_query = """
-    INSERT INTO ecommerceOrders 
-    (order_id, user_id, product_id, quantity, amount, country, created_date, status)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    INSERT INTO ecommersssOrders 
+    (order_id, user_id, product_id, quantity, amount, payment_method, country, created_date, status)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     
     data = (
@@ -85,9 +91,10 @@ def insert_processed_order(enriched_order):
         enriched_order['user_id'],
         enriched_order['product_id'],
         enriched_order['quantity'],
-        enriched_order['amount'],
+        enriched_order['amount'],          # Inserting the Raw String
+        enriched_order['payment_method'],  
         enriched_order['country'],
-        enriched_order['created_date'],
+        enriched_order['created_date'],    # Inserting TIMESTAMP datatype
         enriched_order['status']
     )
     
@@ -96,7 +103,49 @@ def insert_processed_order(enriched_order):
         # Note: Autocommit=True in db.py handles the commit here
         print(f"-> SAVED | Status: {enriched_order['status']} | Amount: {enriched_order['amount']} | Country: {enriched_order['country']}")
     except psycopg2.Error as e:
-        print(f"❌ DB INSERT FAILED for order {enriched_order['order_id']}: {e}")
+        print(f"DB INSERT FAILED for order {enriched_order['order_id']}: {e}")
     finally:
         cursor.close()
         conn.close()
+
+def run_subscriber():
+    """
+    Main function to read from the JSONL file in tail-mode.
+    """
+    file_path = "topicOrders.jsonl"
+    
+    print("--- SUBSCRIBER STARTED ---")
+    print(f"Reading from '{file_path}' (Tail Mode)...")
+    
+    # 1. Wait for file to exist (The 30-second delay logic happens here implicitly)
+    while not os.path.exists(file_path):
+        print("Waiting for producer to create file...", end='\r')
+        time.sleep(5)
+        
+    # 2. Open the file in Read Mode
+    # Using 'with' is important to handle file closing automatically
+    with open(file_path, 'r') as f:
+        while True:
+            # Try to read the next line
+            line = f.readline()
+            
+            if line:
+                # A. DATA FOUND: Process it
+                try:
+                    raw_order = json.loads(line)
+                    enriched = clean_and_process_order(raw_order)
+                    if enriched:
+                        insert_processed_order(enriched)
+                except json.JSONDecodeError:
+                    # Catch incomplete lines that might happen during simultaneous write
+                    print("⚠️ Incomplete JSON line found, skipping...")
+            else:
+                # B. NO DATA (End of File): Wait and try again (The Polling/Tail logic)
+                time.sleep(0.5)
+
+if __name__ == "__main__":
+    try:
+        run_subscriber()
+    except KeyboardInterrupt:
+        print("\nSubscriber stopped (Ctrl+C).")
+        sys.exit(0)
