@@ -55,6 +55,12 @@ def clean_and_process_order(raw_order):
     if status == "genuine" and (amount_numeric >= 300000000 or raw_order['quantity'] > 300):
         status = "fraud"
 
+    # D. Batasan Payment untuk uang Digital atau Paylater yang diset maksimal 50 juta
+    # kalau sudah fraud, tidak perlu dicek pada rule berikutnya. rule berikutnya berlaku jika masih "genuine"
+    if status == "genuine" and raw_order['payment_method'] in ['DANA', 'OVO', 'Gopay', 'Paylater']:
+        if amount_numeric > 50000000: 
+            status = "fraud"
+
     # --- 3. RETURN ENRICHED DATA FOR POSTGRE INSERT ---
     
     return {
