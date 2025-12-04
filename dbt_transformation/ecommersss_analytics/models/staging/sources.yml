@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: streaming_raw     # Unique name for dbt only 
+    database: jcdeah-006    # REAL PROJECT ID name
+    schema: adit_base_finpro  # REAL DATASET name where we put pre-dbt data
+    tables:
+      - name: ecommersssOrders
+      - name: ecommersssUsers
+      - name: ecommersssProducts
