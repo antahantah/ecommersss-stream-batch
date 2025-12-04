@@ -1,15 +1,134 @@
+# services:
+#   postgres:
+#     image: postgres:12       # Matches your old project
+#     container_name: postgres_streaming
+#     environment:
+#       POSTGRES_USER: myuser
+#       POSTGRES_PASSWORD: mypassword
+#       POSTGRES_DB: fraud_detection_db
+#     ports:
+#       - "5433:5432"          # Host Port : Container Port | Port 5433 to avoid conflict 
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+
+# volumes:
+#   postgres_data:
+
+version: '3.8'
+
+x-airflow-common:
+  &airflow-common
+  # 4. IMAGE STRATEGY: We reuse your existing image.
+  image: myairflow:latest
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # 5. DATABASE CONNECTION: 
+    # Notice we use the Service Name "postgres", NOT localhost.
+    # We also updated the user/pass to match your Streaming Project (db.py).
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://myuser:mypassword@postgres/fraud_detection_db
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://myuser:mypassword@postgres/fraud_detection_db
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    # _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-google-cloud-bigquery}
+
+    # 1. Force the Scheduler and DAGs to use Jakarta time by default
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Asia/Jakarta'
+    
+    # 2. Force the Web UI to display Jakarta time by default
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: 'Asia/Jakarta'
+
+  networks:
+    - airflow-net
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
 services:
   postgres:
-    image: postgres:12       # Matches your old project
+    # 3. POSTGRES VERSION: Keeping 12 as requested
+    image: postgres:12
     container_name: postgres_streaming
-    environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
-      POSTGRES_DB: fraud_detection_db
     ports:
-      - "5433:5432"          # Host Port : Container Port | Port 5433 to avoid conflict 
+      # 1. PORT CHANGE: Host 5433 -> Container 5432
+      - "5433:5432"
+    networks:
+      - airflow-net
+    restart: always
+    environment:
+      # ALIGNMENT: We match the credentials from your src/db.py
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=fraud_detection_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "myuser"]
+      interval: 5s
+      retries: 5
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - 8082:8080
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        # Standard Airflow Init Logic
+        mkdir -p /sources/logs /sources/dags /sources/plugins
+        chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        exec /entrypoint airflow db upgrade
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    user: "0:0"
+    volumes:
+      - ./airflow/sources:/sources
+
+networks:
+  airflow-net:
+    driver: bridge
 
 volumes:
   postgres_data:

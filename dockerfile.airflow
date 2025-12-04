@@ -1,0 +1,20 @@
+FROM apache/airflow:2.5.0
+
+USER root
+
+# Install system dependencies
+# git is often needed for dbt to pull packages
+RUN apt-get update && \
+    apt-get install -y sshpass git
+
+# Switch back to airflow user to install Python packages
+USER airflow
+
+# Install the connectors you need for your project
+# 1. Postgres (for your streaming DB connection)
+# 2. Google (for BigQuery loading)
+# 3. dbt-bigquery (since you mentioned doing dbt transformations later)
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-postgres \
+    apache-airflow-providers-google \
+    dbt-bigquery
