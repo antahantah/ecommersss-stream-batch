@@ -66,7 +66,7 @@ def init_db():
         product_id VARCHAR(50) PRIMARY KEY,
         product_name VARCHAR(100),
         category VARCHAR(50),
-        price NUMERIC(18, 2),
+        price BIGINT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
@@ -80,8 +80,8 @@ def init_db():
         first_name VARCHAR(50),
         last_name VARCHAR(50),
         email VARCHAR(100),
-        phone_number VARCHAR(20),
-        registration_date TIMESTAMP
+        default_payment VARCHAR(20),
+        created_date TIMESTAMP
     );
     """
     
